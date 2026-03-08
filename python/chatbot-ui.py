@@ -83,14 +83,14 @@ def _recording_to_wav_file() -> str:
 
 def transcribe_audio(file_path: str) -> str:
     print("Transcribing...")
-    with open(file_path, "rb") as f:
-        r = requests.post(
-            "http://127.0.0.1:8804/transcribe",
-            files={"audio": f},
-            timeout=90,
-        )
+    # Local whisper-host exposes POST /recognize and accepts a file path in JSON.
+    r = requests.post(
+        "http://127.0.0.1:8804/recognize",
+        json={"filePath": file_path},
+        timeout=90,
+    )
     r.raise_for_status()
-    return r.json()["text"]
+    return r.json()["recognition"]
 
 
 def ask_llm(transcript: str) -> str:
