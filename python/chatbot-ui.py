@@ -34,12 +34,13 @@ SAMPLE_RATE = int(os.getenv("MIC_SAMPLE_RATE", "16000"))
 CHANNELS = 1
 
 if not api_key:
-    raise RuntimeError("No API key found. Set KIMI_API_KEY or OPENAI_API_KEY in .env")
+    raise RuntimeError("Missing API key. Set KIMI_API_KEY in .env")
 if not ELEVENLABS_API_KEY:
     raise RuntimeError("ELEVENLABS_API_KEY is required in .env")
 
-print("[LLM] Using model:", MODEL_NAME)
-print("[LLM] Using API endpoint:", base_url)
+print("[LLM] API key present:", api_key is not None)
+print("[LLM] Base URL:", base_url)
+print("[LLM] Model:", MODEL_NAME)
 
 client = OpenAI(
     api_key=api_key,
