@@ -19,10 +19,10 @@ load_dotenv()
 with open("python/sandy_prompt.txt", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read().strip()
 
-api_key = os.getenv("KIMI_API_KEY")
-base_url = os.getenv("KIMI_BASE_URL", "https://api.moonshot.ai/v1")
+api_key = (os.getenv("KIMI_API_KEY") or "").strip()
+base_url = (os.getenv("KIMI_BASE_URL", "https://api.moonshot.ai/v1") or "").strip()
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
-MODEL_NAME = os.getenv("LLM_MODEL", "moonshot-v1-8k")
+MODEL_NAME = (os.getenv("LLM_MODEL", "moonshot-v1-8k") or "").strip()
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM").strip()
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5").strip()
 
@@ -34,9 +34,10 @@ if not api_key:
 if not ELEVENLABS_API_KEY:
     raise RuntimeError("ELEVENLABS_API_KEY is required in .env")
 
-print("[LLM] API key present:", os.getenv("KIMI_API_KEY") is not None)
+print("[LLM] API key present:", bool(api_key))
 print("[LLM] Base URL:", os.getenv("KIMI_BASE_URL"))
 print("[LLM] Model:", MODEL_NAME)
+print("[LLM] API key length:", len(api_key))
 
 client = OpenAI(
     api_key=api_key,
