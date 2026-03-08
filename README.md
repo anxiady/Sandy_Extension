@@ -166,3 +166,9 @@ Run Sandy:
 ```bash
 bash run_chatbot.sh
 ```
+
+## Using Kimi instead of OpenAI
+
+Sandy can use Kimi (Moonshot) through an OpenAI-compatible API endpoint.
+Set `KIMI_API_KEY`, `KIMI_BASE_URL`, and `LLM_MODEL` in your `.env` file.
+The chatbot still uses the OpenAI Python SDK, but requests are sent to Moonshot via `KIMI_BASE_URL`.

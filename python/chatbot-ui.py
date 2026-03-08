@@ -19,9 +19,9 @@ load_dotenv()
 with open("python/sandy_prompt.txt", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read().strip()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+KIMI_API_KEY = os.getenv("KIMI_API_KEY", "").strip()
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
-MODEL = os.getenv("MODEL", "gpt-4o-mini").strip()
+MODEL_NAME = os.getenv("LLM_MODEL", "kimi-k2-0711-preview").strip()
 STT_MODEL = os.getenv("STT_MODEL", "whisper-1").strip()
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM").strip()
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5").strip()
@@ -29,12 +29,15 @@ ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5").stri
 SAMPLE_RATE = int(os.getenv("MIC_SAMPLE_RATE", "16000"))
 CHANNELS = 1
 
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY is required in .env")
+if not KIMI_API_KEY:
+    raise RuntimeError("KIMI_API_KEY is required in .env")
 if not ELEVENLABS_API_KEY:
     raise RuntimeError("ELEVENLABS_API_KEY is required in .env")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(
+    api_key=os.getenv("KIMI_API_KEY"),
+    base_url=os.getenv("KIMI_BASE_URL", "https://api.moonshot.ai/v1"),
+)
 
 _is_recording = False
 _recorded_chunks = []
@@ -88,11 +91,13 @@ def transcribe_audio(wav_data: bytes) -> str:
 
 def ask_llm(transcript: str) -> str:
     print("Thinking...")
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": transcript},
-    ]
-    response = client.chat.completions.create(model=MODEL, messages=messages)
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": transcript},
+        ],
+    )
     return (response.choices[0].message.content or "").strip()
 
 
