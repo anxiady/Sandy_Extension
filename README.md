@@ -133,3 +133,36 @@ sudo systemctl restart chatbot.service
 ## License
 
 [GPL-3.0](https://github.com/PiSugar/whisplay-ai-chatbot?tab=GPL-3.0-1-ov-file#readme)
+
+## Raspberry Pi Setup
+
+Clone the repository:
+
+```bash
+git clone https://github.com/anxiady/Sandy_Extension.git
+cd Sandy_Extension
+```
+
+Install dependencies:
+
+```bash
+bash scripts/install_pi.sh
+```
+
+Create environment file:
+
+```bash
+cp .env.template .env
+```
+
+Edit environment variables:
+
+```bash
+nano .env
+```
+
+Run Sandy:
+
+```bash
+bash run_chatbot.sh
+```

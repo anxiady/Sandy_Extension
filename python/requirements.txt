@@ -4,3 +4,7 @@ numpy
 spidev
 opencv-python-headless
 Flask
+openai
+requests
+sounddevice
+python-dotenv
