@@ -31,6 +31,11 @@ CHANNELS = 1
 
 if not api_key:
     raise RuntimeError("Missing API key. Set KIMI_API_KEY in .env")
+if len(api_key) < 24:
+    raise RuntimeError(
+        f"KIMI_API_KEY looks invalid (length={len(api_key)}). "
+        "Check your real key in .env and remove placeholder values."
+    )
 if not ELEVENLABS_API_KEY:
     raise RuntimeError("ELEVENLABS_API_KEY is required in .env")
 

@@ -9,9 +9,4 @@ if [ ! -f ".env" ]; then
   exit 1
 fi
 
-# Load variables exactly as written in .env (avoids xargs mangling API keys).
-set -a
-source .env
-set +a
-
 python3 python/chatbot-ui.py
