@@ -19,23 +19,31 @@ load_dotenv()
 with open("python/sandy_prompt.txt", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read().strip()
 
-KIMI_API_KEY = os.getenv("KIMI_API_KEY", "").strip()
+api_key = os.getenv("KIMI_API_KEY") or os.getenv("OPENAI_API_KEY")
+base_url = (
+    os.getenv("KIMI_BASE_URL")
+    or os.getenv("OPENAI_BASE_URL")
+    or "https://api.moonshot.cn/v1"
+)
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
-MODEL_NAME = os.getenv("LLM_MODEL", "kimi-k2-0711-preview").strip()
+MODEL_NAME = os.getenv("LLM_MODEL", "moonshot-v1-8k")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM").strip()
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5").strip()
 
 SAMPLE_RATE = int(os.getenv("MIC_SAMPLE_RATE", "16000"))
 CHANNELS = 1
 
-if not KIMI_API_KEY:
-    raise RuntimeError("KIMI_API_KEY is required in .env")
+if not api_key:
+    raise RuntimeError("No API key found. Set KIMI_API_KEY or OPENAI_API_KEY in .env")
 if not ELEVENLABS_API_KEY:
     raise RuntimeError("ELEVENLABS_API_KEY is required in .env")
 
+print("[LLM] Using model:", MODEL_NAME)
+print("[LLM] Using API endpoint:", base_url)
+
 client = OpenAI(
-    api_key=os.getenv("KIMI_API_KEY"),
-    base_url=os.getenv("KIMI_BASE_URL", "https://api.moonshot.ai/v1"),
+    api_key=api_key,
+    base_url=base_url,
 )
 
 _is_recording = False
