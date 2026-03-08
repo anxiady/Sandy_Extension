@@ -1,7 +1,7 @@
-import io
 import os
 import signal
 import sys
+import tempfile
 import threading
 import time
 import wave
@@ -22,7 +22,6 @@ with open("python/sandy_prompt.txt", "r", encoding="utf-8") as f:
 KIMI_API_KEY = os.getenv("KIMI_API_KEY", "").strip()
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
 MODEL_NAME = os.getenv("LLM_MODEL", "kimi-k2-0711-preview").strip()
-STT_MODEL = os.getenv("STT_MODEL", "whisper-1").strip()
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM").strip()
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5").strip()
 
@@ -64,29 +63,34 @@ def _recording_stream():
     )
 
 
-def _recording_to_wav_bytes() -> bytes:
+def _recording_to_wav_file() -> str:
     with _record_lock:
         if not _recorded_chunks:
-            return b""
+            return ""
         audio = np.concatenate(_recorded_chunks, axis=0)
     audio = np.clip(audio, -1.0, 1.0)
     pcm16 = (audio * 32767.0).astype(np.int16)
 
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as wf:
+    fd, temp_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    with wave.open(temp_path, "wb") as wf:
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(2)
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(pcm16.tobytes())
-    return buffer.getvalue()
+    return temp_path
 
 
-def transcribe_audio(wav_data: bytes) -> str:
+def transcribe_audio(file_path: str) -> str:
     print("Transcribing...")
-    audio_file = io.BytesIO(wav_data)
-    audio_file.name = "recording.wav"
-    result = client.audio.transcriptions.create(model=STT_MODEL, file=audio_file)
-    return (result.text or "").strip()
+    with open(file_path, "rb") as f:
+        r = requests.post(
+            "http://127.0.0.1:8804/transcribe",
+            files={"audio": f},
+            timeout=90,
+        )
+    r.raise_for_status()
+    return r.json()["text"]
 
 
 def ask_llm(transcript: str) -> str:
@@ -134,12 +138,12 @@ def process_turn() -> None:
         return
 
     try:
-        wav_data = _recording_to_wav_bytes()
-        if not wav_data:
+        audio_file = _recording_to_wav_file()
+        if not audio_file:
             print("No audio captured.")
             return
 
-        transcript = transcribe_audio(wav_data)
+        transcript = transcribe_audio(audio_file)
         if not transcript:
             print("No speech recognized.")
             return
@@ -155,6 +159,8 @@ def process_turn() -> None:
     except Exception as exc:
         print(f"Error: {exc}")
     finally:
+        if "audio_file" in locals() and audio_file and os.path.exists(audio_file):
+            os.remove(audio_file)
         _busy_lock.release()
 
 
