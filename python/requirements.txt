@@ -8,3 +8,5 @@ openai
 requests
 sounddevice
 python-dotenv
+openai-whisper
+torch

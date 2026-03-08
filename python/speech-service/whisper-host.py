@@ -9,7 +9,9 @@ import signal
 import sys
 
 # ---------- Configuration ----------
-MODEL_NAME = os.getenv("WHISPER_MODEL_SIZE_OR_PATH", "/home/pi/.cache/whisper/tiny.pt")  # tiny / base / small / medium / large
+# Whisper automatically downloads the model to ~/.cache/whisper
+# Do not reference .pt files directly; use model names like "tiny".
+MODEL_NAME = "tiny"  # tiny / base / small / medium / large
 DEVICE = "cpu"
 
 # ---------- Initialization ----------
