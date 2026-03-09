@@ -80,9 +80,10 @@ def _audio_callback(indata, frames, time_info, status):
 
 def _recording_stream():
     return sd.InputStream(
-        samplerate=SAMPLE_RATE,
-        channels=CHANNELS,
+        samplerate=16000,
+        channels=1,
         dtype="float32",
+        blocksize=512,
         callback=_audio_callback,
     )
 
@@ -143,16 +144,12 @@ def ask_llm(transcript: str) -> str:
 def normalize_query(text: str) -> str:
     show_avatar("thinking", "Interpreting...")
     prompt = f"""
-You correct speech recognition errors.
-
-The text below came from speech recognition and may contain mistakes.
-
-Correct the transcription while preserving the meaning.
+Correct speech recognition mistakes but keep the meaning.
 
 Examples:
 iron war -> Iran war
-watch island eat -> what time is it
-news about ukraine worn -> news about the Ukraine war
+apple vision bro -> Apple Vision Pro
+tesla mask -> Tesla Musk
 
 Transcript:
 {text}
@@ -162,7 +159,7 @@ Corrected query:
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[
-            {"role": "system", "content": "You correct speech recognition mistakes."},
+            {"role": "system", "content": "You fix speech recognition errors."},
             {"role": "user", "content": prompt},
         ],
         temperature=0,
