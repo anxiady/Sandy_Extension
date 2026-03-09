@@ -3,10 +3,13 @@ cairosvg
 numpy
 spidev
 opencv-python-headless
-Flask
+flask
 openai
 requests
 sounddevice
 python-dotenv
 openai-whisper
 torch
+faster-whisper
+ctranslate2
+sentencepiece

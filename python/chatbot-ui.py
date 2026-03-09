@@ -104,14 +104,14 @@ def _recording_to_wav_file() -> str:
 def transcribe_audio(file_path: str) -> str:
     show_avatar("thinking", "Transcribing...")
     print("Transcribing...")
-    # Local whisper-host exposes POST /recognize and accepts a file path in JSON.
-    r = requests.post(
-        "http://127.0.0.1:8804/recognize",
-        json={"filePath": file_path},
-        timeout=90,
-    )
+    with open(file_path, "rb") as f:
+        r = requests.post(
+            "http://127.0.0.1:8804/transcribe",
+            files={"audio": f},
+            timeout=90,
+        )
     r.raise_for_status()
-    return r.json()["recognition"]
+    return r.json()["text"]
 
 
 def ask_llm(transcript: str) -> str:
@@ -132,19 +132,16 @@ def ask_llm(transcript: str) -> str:
 def normalize_query(text: str) -> str:
     show_avatar("thinking", "Interpreting...")
     prompt = f"""
-You are a speech interpretation system.
+You correct speech recognition errors.
 
 The text below came from speech recognition and may contain mistakes.
 
-Correct transcription errors and produce the most likely user query.
-
-Do not change the meaning.
+Correct the transcription while preserving the meaning.
 
 Examples:
-
-iron war → Iran war
-watch island eat → what time is it
-news about ukraine worn → news about the Ukraine war
+iron war -> Iran war
+watch island eat -> what time is it
+news about ukraine worn -> news about the Ukraine war
 
 Transcript:
 {text}

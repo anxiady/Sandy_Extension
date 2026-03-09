@@ -1,122 +1,49 @@
-import base64
-import time
-import tempfile
 import os
-from flask import Flask, request, jsonify
-import whisper
-import argparse
-import signal
-import sys
+import tempfile
 
-# ---------- Configuration ----------
-# Whisper automatically downloads the model to ~/.cache/whisper
-# Do not reference .pt files directly; use model names like "tiny".
-# "tiny" is faster but less accurate.
-# "base" provides significantly better speech recognition quality
-# while still being usable on Raspberry Pi 5.
-MODEL_NAME = "base"  # tiny / base / small / medium / large
+from faster_whisper import WhisperModel
+from flask import Flask, jsonify, request
+
+MODEL_NAME = "base"
 DEVICE = "cpu"
 
-# ---------- Initialization ----------
+print("[INIT] Loading Faster Whisper model...")
+model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type="int8")
+
 app = Flask(__name__)
 
-t0 = time.perf_counter()
-print("[INIT] Loading whisper model...")
-model = whisper.load_model(MODEL_NAME, device=DEVICE)
-t1 = time.perf_counter()
-print(f"[INIT] Model loaded in {round(t1 - t0, 2)} seconds")
+
+@app.route("/transcribe", methods=["POST"])
+def transcribe():
+    if "audio" not in request.files:
+        return jsonify({"error": "Missing audio file"}), 400
+
+    audio_file = request.files["audio"]
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+        audio_file.save(f.name)
+        audio_path = f.name
+
+    try:
+        segments, info = model.transcribe(
+            audio_path,
+            beam_size=5,
+            language="auto",
+            initial_prompt=(
+                "Middle East Iran Israel Gaza Ukraine Russia war news politics"
+            ),
+        )
+
+        text = ""
+        for seg in segments:
+            text += seg.text + " "
+
+        return jsonify({"text": text.strip()})
+    finally:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
 
 
-# ---------- Utility Functions ----------
-def save_base64_to_temp_file(b64: str):
-  """Save base64 audio to a temporary file and return its path"""
-  try:
-    audio_bytes = base64.b64decode(b64)
-    # Create temporary file
-    fd, temp_path = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)  # Close file descriptor
-    
-    # Write to file
-    with open(temp_path, 'wb') as f:
-      f.write(audio_bytes)
-    
-    return temp_path
-  except Exception as e:
-    raise ValueError(f"Failed to save base64 to temp file: {e}")
-
-# ---------- API ----------
-@app.route("/recognize", methods=["POST"])
-def recognize():
-  data = request.get_json(force=True, silent=True)
-  if not data:
-    return jsonify({"error": "Invalid JSON"}), 400
-
-  file_path = data.get("filePath")
-  b64_audio = data.get("base64")
-  language = data.get("language")
-
-  if not file_path and not b64_audio:
-    return jsonify({
-      "error": "Either filePath or base64 must be provided"
-    }), 400
-
-  temp_file = None
-  try:
-    t0 = time.perf_counter()
-
-    # 1. Determine audio file path
-    if file_path:
-      audio_path = file_path
-    else:
-      # Convert base64 to temporary file
-      temp_file = save_base64_to_temp_file(b64_audio)
-      audio_path = temp_file
-
-    # 2. Transcribe using file path
-    result = model.transcribe(
-      audio_path,
-      language=language,
-      fp16=False  # Use fp16=False for CPU
-    )
-
-    text = result["text"].strip()
-
-    t1 = time.perf_counter()
-
-    return jsonify({
-      "recognition": text,
-      "language": result["language"],
-      "time_cost": round(t1 - t0, 3)
-    })
-
-  except Exception as e:
-    return jsonify({"error": str(e)}), 500
-  
-  finally:
-    # Clean up temporary file
-    if temp_file and os.path.exists(temp_file):
-      try:
-        os.remove(temp_file)
-      except:
-        pass
-
-def shutdown(sig, frame):
-    print("Shutting down python server...")
-    sys.exit(0)
-
-# ---------- Startup ----------
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser(description='Whisper API Server')
-  parser.add_argument('--port', type=int, default=8804, help='Port to run the server on')
-  args = parser.parse_args()
-  
-  signal.signal(signal.SIGTERM, shutdown)
-  signal.signal(signal.SIGINT, shutdown)
-  
-  print(f"[STARTING] Starting Whisper server on port {args.port}...")
-  
-  app.run(
-    host="0.0.0.0",
-    port=args.port,
-    threaded=False  # Very important on Pi
-  )
+    print("[STARTING] Faster Whisper server on port 8804")
+    app.run(host="0.0.0.0", port=8804)
