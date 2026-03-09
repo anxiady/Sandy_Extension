@@ -9,6 +9,18 @@ if [ ! -f ".env" ]; then
   exit 1
 fi
 
+echo "Maximizing Whisplay speaker volume..."
+CARD_INDEX="$(awk '/wm8960/ {gsub(/[^0-9]/, "", $1); print $1; exit}' /proc/asound/cards 2>/dev/null)"
+if [ -n "$CARD_INDEX" ]; then
+  amixer -c "$CARD_INDEX" sset Speaker 100% >/dev/null 2>&1 || true
+  amixer -c "$CARD_INDEX" sset Speaker unmute >/dev/null 2>&1 || true
+else
+  for c in 0 1 2; do
+    amixer -c "$c" sset Speaker 100% >/dev/null 2>&1 || true
+    amixer -c "$c" sset Speaker unmute >/dev/null 2>&1 || true
+  done
+fi
+
 echo "Starting Whisper STT server..."
 python3 python/speech-service/whisper-host.py > whisper.log 2>&1 &
 WHISPER_PID=$!
