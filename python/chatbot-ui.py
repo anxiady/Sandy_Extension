@@ -77,17 +77,17 @@ _resume_reply_text = ""
 _barge_in_started_at = 0.0
 _playback_floor_rms = 0.0
 _playback_floor_peak = 0.0
-_user_voice_rms = 2600.0
-_user_voice_peak = 9000.0
+_user_voice_rms = 400.0
+_user_voice_peak = 2200.0
 
-BARGE_IN_PEAK_THRESHOLD = int(os.getenv("BARGE_IN_PEAK_THRESHOLD", "9000"))
-BARGE_IN_RMS_THRESHOLD = int(os.getenv("BARGE_IN_RMS_THRESHOLD", "2200"))
-BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "10"))
-BARGE_IN_CALIBRATION_SEC = float(os.getenv("BARGE_IN_CALIBRATION_SEC", "0.8"))
-BARGE_IN_RMS_MULTIPLIER = float(os.getenv("BARGE_IN_RMS_MULTIPLIER", "2.5"))
-BARGE_IN_PEAK_MULTIPLIER = float(os.getenv("BARGE_IN_PEAK_MULTIPLIER", "2.0"))
-USER_RMS_FACTOR = float(os.getenv("USER_RMS_FACTOR", "0.8"))
-USER_PEAK_FACTOR = float(os.getenv("USER_PEAK_FACTOR", "0.75"))
+BARGE_IN_PEAK_THRESHOLD = int(os.getenv("BARGE_IN_PEAK_THRESHOLD", "1800"))
+BARGE_IN_RMS_THRESHOLD = int(os.getenv("BARGE_IN_RMS_THRESHOLD", "180"))
+BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "6"))
+BARGE_IN_CALIBRATION_SEC = float(os.getenv("BARGE_IN_CALIBRATION_SEC", "0.6"))
+BARGE_IN_RMS_MULTIPLIER = float(os.getenv("BARGE_IN_RMS_MULTIPLIER", "2.0"))
+BARGE_IN_PEAK_MULTIPLIER = float(os.getenv("BARGE_IN_PEAK_MULTIPLIER", "2.2"))
+USER_RMS_FACTOR = float(os.getenv("USER_RMS_FACTOR", "0.55"))
+USER_PEAK_FACTOR = float(os.getenv("USER_PEAK_FACTOR", "0.55"))
 
 
 def _audio_callback(indata, frames, time_info, status):
@@ -108,6 +108,7 @@ def _audio_callback(indata, frames, time_info, status):
                 _playback_floor_rms = max(_playback_floor_rms, rms)
                 _barge_in_frames = 0
             else:
+                # Blend speaker leak floor + learned user voice profile.
                 dynamic_peak_threshold = max(
                     BARGE_IN_PEAK_THRESHOLD,
                     _playback_floor_peak * BARGE_IN_PEAK_MULTIPLIER,
@@ -124,6 +125,9 @@ def _audio_callback(indata, frames, time_info, status):
                         _barge_in_requested = True
                 else:
                     _barge_in_frames = 0
+                    # Keep adapting playback floor slowly when no barge-in is detected.
+                    _playback_floor_peak = max(_playback_floor_peak * 0.98, peak)
+                    _playback_floor_rms = max(_playback_floor_rms * 0.98, rms)
         with _record_lock:
             if _is_recording and mic_enabled:
                 _recorded_chunks.append(indata.copy())
