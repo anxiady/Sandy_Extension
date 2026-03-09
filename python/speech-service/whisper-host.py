@@ -11,7 +11,10 @@ import sys
 # ---------- Configuration ----------
 # Whisper automatically downloads the model to ~/.cache/whisper
 # Do not reference .pt files directly; use model names like "tiny".
-MODEL_NAME = "tiny"  # tiny / base / small / medium / large
+# "tiny" is faster but less accurate.
+# "base" provides significantly better speech recognition quality
+# while still being usable on Raspberry Pi 5.
+MODEL_NAME = "base"  # tiny / base / small / medium / large
 DEVICE = "cpu"
 
 # ---------- Initialization ----------
