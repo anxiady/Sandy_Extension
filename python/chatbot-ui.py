@@ -11,6 +11,7 @@ import sounddevice as sd
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from display_manager import init_display, show_text
 from whisplay import WhisplayBoard
 
 load_dotenv()
@@ -96,6 +97,7 @@ def _recording_to_wav_file() -> str:
 
 
 def transcribe_audio(file_path: str) -> str:
+    show_text("Transcribing...")
     print("Transcribing...")
     # Local whisper-host exposes POST /recognize and accepts a file path in JSON.
     r = requests.post(
@@ -108,6 +110,7 @@ def transcribe_audio(file_path: str) -> str:
 
 
 def ask_llm(transcript: str) -> str:
+    show_text("Thinking...")
     print("Thinking...")
     response = client.chat.completions.create(
         model=MODEL_NAME,
@@ -158,6 +161,7 @@ def record_audio() -> str:
     global _is_recording
     if not mic_enabled:
         return ""
+    show_text("Listening...")
     print("Listening...")
     with _record_lock:
         _recorded_chunks.clear()
@@ -188,16 +192,19 @@ def process_turn() -> None:
 
         transcript = transcribe_audio(audio_file)
         if not transcript:
+            show_text("No speech recognized.")
             print("No speech recognized.")
             return
 
         print(f"You: {transcript}")
         reply = ask_llm(transcript)
         if not reply:
+            show_text("Sandy returned an empty response.")
             print("Sandy returned an empty response.")
             return
 
         print(f"Sandy: {reply}")
+        show_text(reply[:120])
         mic_enabled = False
         try:
             speak_text(reply)
@@ -217,8 +224,10 @@ def on_button_press() -> None:
         conversation_active = not conversation_active
         active = conversation_active
     if active:
+        show_text("Conversation mode ON")
         print("Conversation mode ON")
     else:
+        show_text("Idle")
         print("Conversation mode OFF")
 
 
@@ -230,10 +239,12 @@ def shutdown(signum=None, frame=None) -> None:
 def main() -> None:
     board = WhisplayBoard()
     board.on_button_press(on_button_press)
+    init_display(board)
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
+    show_text("Sandy Ready")
     print("Sandy v1 ready. Press button to toggle conversation mode.")
 
     try:
