@@ -17,6 +17,7 @@ from display_manager import (
     show_avatar,
     stop_speaking_animation,
 )
+from audio_clean import clean_audio as clean_audio_file
 from whisplay import WhisplayBoard
 
 load_dotenv()
@@ -59,10 +60,13 @@ _is_recording = False
 conversation_active = False
 mic_enabled = True
 _recorded_chunks = []
+conversation_history = []
 _record_lock = threading.Lock()
 _state_lock = threading.Lock()
 _busy_lock = threading.Lock()
 _stop_event = threading.Event()
+_board = None
+_is_speaking = False
 
 
 def _audio_callback(indata, frames, time_info, status):
@@ -118,13 +122,19 @@ def transcribe_audio(file_path: str) -> str:
 def ask_llm(transcript: str) -> str:
     show_avatar("thinking", transcript[:80])
     print("Thinking...")
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages += conversation_history[-6:]
+    messages.append(
+        {
+            "role": "user",
+            "content": f"Answer briefly in one or two sentences.\n{transcript}",
+        }
+    )
     response = client.chat.completions.create(
         model=MODEL_NAME,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": transcript},
-        ],
+        messages=messages,
         temperature=0.7,
+        max_tokens=120,
     )
     reply = response.choices[0].message.content
     return (reply or "").strip()
@@ -161,7 +171,27 @@ Corrected query:
     return (corrected or "").strip()
 
 
+def needs_clarification(query: str) -> bool:
+    ambiguous_terms = [
+        "war",
+        "news",
+        "conflict",
+        "updates",
+        "latest",
+        "politics",
+    ]
+    words = query.lower().split()
+
+    if len(words) <= 3:
+        for t in ambiguous_terms:
+            if t in query.lower():
+                return True
+
+    return False
+
+
 def speak_text(text: str) -> None:
+    global _is_speaking
     print("Speaking...")
     url = (
         f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
@@ -186,7 +216,25 @@ def speak_text(text: str) -> None:
 
     audio = pcm.astype(np.float32) / 32768.0
     sd.play(audio, samplerate=16000)
-    sd.wait()
+    _is_speaking = True
+    try:
+        while True:
+            if _board is not None and _board.button_pressed():
+                sd.stop()
+                break
+            try:
+                stream = sd.get_stream()
+            except Exception:
+                break
+            if stream is None or not stream.active:
+                break
+            time.sleep(0.05)
+    finally:
+        _is_speaking = False
+
+
+def speak(text: str) -> None:
+    speak_text(text)
 
 
 def is_conversation_active() -> bool:
@@ -227,7 +275,9 @@ def process_turn() -> None:
             print("No audio captured.")
             return
 
-        raw_transcript = transcribe_audio(audio_file)
+        clean_audio_path = f"{audio_file}.clean.wav"
+        clean_audio_file(audio_file, clean_audio_path)
+        raw_transcript = transcribe_audio(clean_audio_path)
         if not raw_transcript:
             show_avatar("idle", "No speech recognized.")
             print("No speech recognized.")
@@ -239,13 +289,27 @@ def process_turn() -> None:
 
         print("Raw:", raw_transcript)
         print("Normalized:", normalized_query)
+        transcript = normalized_query
 
-        reply = ask_llm(normalized_query)
+        if needs_clarification(transcript):
+            show_avatar("speaking1", "Do you mean the most recent events?")
+            mic_enabled = False
+            try:
+                animate_speaking("Do you mean the most recent events?")
+                speak("Do you mean the most recent events?")
+            finally:
+                stop_speaking_animation()
+                mic_enabled = True
+            return
+
+        reply = ask_llm(transcript)
         if not reply:
             show_avatar("idle", "No response.")
             print("Sandy returned an empty response.")
             return
 
+        conversation_history.append({"role": "user", "content": transcript})
+        conversation_history.append({"role": "assistant", "content": reply})
         print(f"Sandy: {reply}")
         show_avatar("speaking1", reply[:120])
         mic_enabled = False
@@ -260,11 +324,16 @@ def process_turn() -> None:
     finally:
         if audio_file and os.path.exists(audio_file):
             os.remove(audio_file)
+        clean_audio_path = f"{audio_file}.clean.wav"
+        if audio_file and os.path.exists(clean_audio_path):
+            os.remove(clean_audio_path)
         _busy_lock.release()
 
 
 def on_button_press() -> None:
     global conversation_active
+    if _is_speaking:
+        return
     with _state_lock:
         conversation_active = not conversation_active
         active = conversation_active
@@ -283,8 +352,10 @@ def shutdown(signum=None, frame=None) -> None:
 
 
 def main() -> None:
+    global _board
     board = WhisplayBoard()
     board.set_backlight(100)
+    _board = board
     board.on_button_press(on_button_press)
     init_display(board)
 

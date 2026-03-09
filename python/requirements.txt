@@ -13,3 +13,5 @@ torch
 faster-whisper
 ctranslate2
 sentencepiece
+noisereduce
+soundfile
