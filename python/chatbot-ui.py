@@ -1,6 +1,5 @@
 import os
 import signal
-import sys
 import tempfile
 import threading
 import time
@@ -28,6 +27,7 @@ ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5").stri
 
 SAMPLE_RATE = int(os.getenv("MIC_SAMPLE_RATE", "16000"))
 CHANNELS = 1
+TURN_RECORD_SECONDS = float(os.getenv("TURN_RECORD_SECONDS", "4.0"))
 
 if not api_key:
     raise RuntimeError("Missing API key. Set KIMI_API_KEY in .env")
@@ -50,8 +50,11 @@ client = OpenAI(
 )
 
 _is_recording = False
+conversation_active = False
+mic_enabled = True
 _recorded_chunks = []
 _record_lock = threading.Lock()
+_state_lock = threading.Lock()
 _busy_lock = threading.Lock()
 _stop_event = threading.Event()
 
@@ -61,7 +64,7 @@ def _audio_callback(indata, frames, time_info, status):
     if status:
         print(f"[audio] {status}")
     with _record_lock:
-        if _is_recording:
+        if _is_recording and mic_enabled:
             _recorded_chunks.append(indata.copy())
 
 
@@ -146,12 +149,39 @@ def speak_text(text: str) -> None:
     sd.wait()
 
 
+def is_conversation_active() -> bool:
+    with _state_lock:
+        return conversation_active
+
+
+def record_audio() -> str:
+    global _is_recording
+    if not mic_enabled:
+        return ""
+    print("Listening...")
+    with _record_lock:
+        _recorded_chunks.clear()
+        _is_recording = True
+    end_time = time.time() + TURN_RECORD_SECONDS
+    while time.time() < end_time and not _stop_event.is_set():
+        if not is_conversation_active():
+            break
+        time.sleep(0.05)
+    with _record_lock:
+        _is_recording = False
+    if not is_conversation_active():
+        return ""
+    return _recording_to_wav_file()
+
+
 def process_turn() -> None:
+    global mic_enabled
     if not _busy_lock.acquire(blocking=False):
         return
 
+    audio_file = ""
     try:
-        audio_file = _recording_to_wav_file()
+        audio_file = record_audio()
         if not audio_file:
             print("No audio captured.")
             return
@@ -168,30 +198,28 @@ def process_turn() -> None:
             return
 
         print(f"Sandy: {reply}")
-        speak_text(reply)
+        mic_enabled = False
+        try:
+            speak_text(reply)
+        finally:
+            mic_enabled = True
     except Exception as exc:
         print(f"Error: {exc}")
     finally:
-        if "audio_file" in locals() and audio_file and os.path.exists(audio_file):
+        if audio_file and os.path.exists(audio_file):
             os.remove(audio_file)
         _busy_lock.release()
 
 
 def on_button_press() -> None:
-    global _is_recording
-    with _record_lock:
-        _recorded_chunks.clear()
-        _is_recording = True
-    print("Listening...")
-
-
-def on_button_release() -> None:
-    global _is_recording
-    with _record_lock:
-        was_recording = _is_recording
-        _is_recording = False
-    if was_recording:
-        threading.Thread(target=process_turn, daemon=True).start()
+    global conversation_active
+    with _state_lock:
+        conversation_active = not conversation_active
+        active = conversation_active
+    if active:
+        print("Conversation mode ON")
+    else:
+        print("Conversation mode OFF")
 
 
 def shutdown(signum=None, frame=None) -> None:
@@ -202,17 +230,19 @@ def shutdown(signum=None, frame=None) -> None:
 def main() -> None:
     board = WhisplayBoard()
     board.on_button_press(on_button_press)
-    board.on_button_release(on_button_release)
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    print("Sandy v1 ready. Hold button to talk, release to send.")
+    print("Sandy v1 ready. Press button to toggle conversation mode.")
 
     try:
         with _recording_stream():
             while not _stop_event.is_set():
-                time.sleep(0.05)
+                if is_conversation_active():
+                    process_turn()
+                else:
+                    time.sleep(0.05)
     finally:
         board.cleanup()
 
