@@ -18,7 +18,6 @@ from display_manager import (
     show_avatar,
     stop_speaking_animation,
 )
-from audio_clean import clean_audio as clean_audio_file
 from whisplay import WhisplayBoard
 
 load_dotenv()
@@ -75,13 +74,21 @@ _is_speaking = False
 _barge_in_requested = False
 _barge_in_frames = 0
 _resume_reply_text = ""
+_barge_in_started_at = 0.0
+_playback_floor_rms = 0.0
+_playback_floor_peak = 0.0
 
-BARGE_IN_THRESHOLD = int(os.getenv("BARGE_IN_THRESHOLD", "4000"))
-BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "8"))
+BARGE_IN_PEAK_THRESHOLD = int(os.getenv("BARGE_IN_PEAK_THRESHOLD", "9000"))
+BARGE_IN_RMS_THRESHOLD = int(os.getenv("BARGE_IN_RMS_THRESHOLD", "2200"))
+BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "24"))
+BARGE_IN_CALIBRATION_SEC = float(os.getenv("BARGE_IN_CALIBRATION_SEC", "0.8"))
+BARGE_IN_RMS_MULTIPLIER = float(os.getenv("BARGE_IN_RMS_MULTIPLIER", "2.5"))
+BARGE_IN_PEAK_MULTIPLIER = float(os.getenv("BARGE_IN_PEAK_MULTIPLIER", "2.0"))
 
 
 def _audio_callback(indata, frames, time_info, status):
     global _barge_in_requested, _barge_in_frames
+    global _playback_floor_peak, _playback_floor_rms
     del frames, time_info
     try:
         # Ignore overflow/underflow warnings to keep capture loop stable.
@@ -89,12 +96,25 @@ def _audio_callback(indata, frames, time_info, status):
             print(f"[audio] {status}")
         if _is_speaking:
             peak = float(np.max(np.abs(indata)))
-            if peak >= BARGE_IN_THRESHOLD:
-                _barge_in_frames += 1
-                if _barge_in_frames >= BARGE_IN_FRAMES_REQUIRED:
-                    _barge_in_requested = True
-            else:
+            rms = float(np.sqrt(np.mean(np.square(indata.astype(np.float32)))))
+            speaking_elapsed = time.time() - _barge_in_started_at
+            if speaking_elapsed < BARGE_IN_CALIBRATION_SEC:
+                _playback_floor_peak = max(_playback_floor_peak, peak)
+                _playback_floor_rms = max(_playback_floor_rms, rms)
                 _barge_in_frames = 0
+            else:
+                dynamic_peak_threshold = max(
+                    BARGE_IN_PEAK_THRESHOLD, _playback_floor_peak * BARGE_IN_PEAK_MULTIPLIER
+                )
+                dynamic_rms_threshold = max(
+                    BARGE_IN_RMS_THRESHOLD, _playback_floor_rms * BARGE_IN_RMS_MULTIPLIER
+                )
+                if peak >= dynamic_peak_threshold and rms >= dynamic_rms_threshold:
+                    _barge_in_frames += 1
+                    if _barge_in_frames >= BARGE_IN_FRAMES_REQUIRED:
+                        _barge_in_requested = True
+                else:
+                    _barge_in_frames = 0
         with _record_lock:
             if _is_recording and mic_enabled:
                 _recorded_chunks.append(indata.copy())
@@ -216,6 +236,7 @@ def needs_clarification(query: str) -> bool:
 
 def speak_text(text: str) -> bool:
     global _is_speaking, _barge_in_requested, _barge_in_frames
+    global _barge_in_started_at, _playback_floor_peak, _playback_floor_rms
     print("Speaking...")
     url = (
         f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
@@ -246,6 +267,9 @@ def speak_text(text: str) -> bool:
     pygame.mixer.music.load(audio_file)
     pygame.mixer.music.play()
     _is_speaking = True
+    _barge_in_started_at = time.time()
+    _playback_floor_peak = 0.0
+    _playback_floor_rms = 0.0
     interrupted = False
     _barge_in_requested = False
     _barge_in_frames = 0
@@ -266,6 +290,8 @@ def speak_text(text: str) -> bool:
         _is_speaking = False
         _barge_in_frames = 0
         _barge_in_requested = False
+        _playback_floor_peak = 0.0
+        _playback_floor_rms = 0.0
         try:
             os.remove(audio_file)
         except Exception:
@@ -331,9 +357,7 @@ def process_turn() -> None:
             print("No audio captured.")
             return
 
-        clean_audio_path = f"{audio_file}.clean.wav"
-        clean_audio_file(audio_file, clean_audio_path)
-        raw_transcript = transcribe_audio(clean_audio_path)
+        raw_transcript = transcribe_audio(audio_file)
         if not raw_transcript:
             if _resume_reply_text:
                 show_avatar("speaking1", _resume_reply_text[:120])
@@ -411,9 +435,6 @@ def process_turn() -> None:
     finally:
         if audio_file and os.path.exists(audio_file):
             os.remove(audio_file)
-        clean_audio_path = f"{audio_file}.clean.wav"
-        if audio_file and os.path.exists(clean_audio_path):
-            os.remove(clean_audio_path)
         _busy_lock.release()
 
 
