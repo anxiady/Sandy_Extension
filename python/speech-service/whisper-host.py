@@ -1,5 +1,6 @@
 import os
 import tempfile
+import traceback
 
 from faster_whisper import WhisperModel
 from flask import Flask, jsonify, request
@@ -28,7 +29,7 @@ def transcribe():
         segments, info = model.transcribe(
             audio_path,
             beam_size=5,
-            language="auto",
+            language=None,
             initial_prompt=(
                 "Middle East Iran Israel Gaza Ukraine Russia war news politics"
             ),
@@ -37,8 +38,11 @@ def transcribe():
         text = ""
         for seg in segments:
             text += seg.text + " "
-
         return jsonify({"text": text.strip()})
+    except Exception as exc:
+        print(f"[STT] transcribe error: {exc}")
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 500
     finally:
         if os.path.exists(audio_path):
             os.remove(audio_path)

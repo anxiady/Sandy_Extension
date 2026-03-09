@@ -110,7 +110,8 @@ def transcribe_audio(file_path: str) -> str:
             files={"audio": f},
             timeout=90,
         )
-    r.raise_for_status()
+    if not r.ok:
+        raise RuntimeError(f"STT server error {r.status_code}: {r.text}")
     return r.json()["text"]
 
 
