@@ -172,3 +172,11 @@ bash run_chatbot.sh
 Sandy can use Kimi (Moonshot) through an OpenAI-compatible API endpoint.
 Set `KIMI_API_KEY`, `KIMI_BASE_URL`, and `LLM_MODEL` in your `.env` file.
 The chatbot still uses the OpenAI Python SDK, but requests are sent to Moonshot via `KIMI_BASE_URL`.
+
+## Enable Boot Display Service
+
+```bash
+sudo cp scripts/sandy-display.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable sandy-display
+```

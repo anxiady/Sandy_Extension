@@ -1,0 +1,11 @@
+[Unit]
+Description=Sandy Boot Display
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/sandycheese/Sandy_Extension/python/boot_screen.py
+Restart=always
+User=sandycheese
+
+[Install]
+WantedBy=multi-user.target
