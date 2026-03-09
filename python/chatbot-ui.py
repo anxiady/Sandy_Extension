@@ -72,14 +72,28 @@ _stop_event = threading.Event()
 _board = None
 whisplay = None
 _is_speaking = False
+_barge_in_requested = False
+_barge_in_frames = 0
+
+BARGE_IN_THRESHOLD = int(os.getenv("BARGE_IN_THRESHOLD", "1800"))
+BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "4"))
 
 
 def _audio_callback(indata, frames, time_info, status):
+    global _barge_in_requested, _barge_in_frames
     del frames, time_info
     try:
         # Ignore overflow/underflow warnings to keep capture loop stable.
         if status and not status.input_overflow:
             print(f"[audio] {status}")
+        if _is_speaking:
+            peak = float(np.max(np.abs(indata)))
+            if peak >= BARGE_IN_THRESHOLD:
+                _barge_in_frames += 1
+                if _barge_in_frames >= BARGE_IN_FRAMES_REQUIRED:
+                    _barge_in_requested = True
+            else:
+                _barge_in_frames = 0
         with _record_lock:
             if _is_recording and mic_enabled:
                 _recorded_chunks.append(indata.copy())
@@ -200,7 +214,7 @@ def needs_clarification(query: str) -> bool:
 
 
 def speak_text(text: str) -> None:
-    global _is_speaking
+    global _is_speaking, _barge_in_requested, _barge_in_frames
     print("Speaking...")
     url = (
         f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
@@ -231,15 +245,23 @@ def speak_text(text: str) -> None:
     pygame.mixer.music.load(audio_file)
     pygame.mixer.music.play()
     _is_speaking = True
+    _barge_in_requested = False
+    _barge_in_frames = 0
     try:
         while pygame.mixer.music.get_busy():
             if whisplay is not None and whisplay.button_pressed():
                 pygame.mixer.music.stop()
                 print("Speech interrupted")
                 break
+            if _barge_in_requested:
+                pygame.mixer.music.stop()
+                print("Speech interrupted by voice")
+                break
             time.sleep(0.05)
     finally:
         _is_speaking = False
+        _barge_in_frames = 0
+        _barge_in_requested = False
         try:
             os.remove(audio_file)
         except Exception:
