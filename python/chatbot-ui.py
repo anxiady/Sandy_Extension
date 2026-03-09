@@ -1,4 +1,5 @@
 import os
+import pygame
 import signal
 import tempfile
 import threading
@@ -21,6 +22,7 @@ from audio_clean import clean_audio as clean_audio_file
 from whisplay import WhisplayBoard
 
 load_dotenv()
+sd.default.blocksize = 256
 
 with open("python/sandy_prompt.txt", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read().strip()
@@ -71,21 +73,29 @@ _is_speaking = False
 
 def _audio_callback(indata, frames, time_info, status):
     del frames, time_info
-    if status:
-        print(f"[audio] {status}")
-    with _record_lock:
-        if _is_recording and mic_enabled:
-            _recorded_chunks.append(indata.copy())
+    try:
+        # Ignore overflow/underflow warnings to keep capture loop stable.
+        if status and not status.input_overflow:
+            print(f"[audio] {status}")
+        with _record_lock:
+            if _is_recording and mic_enabled:
+                _recorded_chunks.append(indata.copy())
+    except Exception as exc:
+        print(f"[audio] callback error: {exc}")
 
 
 def _recording_stream():
-    return sd.InputStream(
-        samplerate=16000,
-        channels=1,
-        dtype="float32",
-        blocksize=512,
-        callback=_audio_callback,
-    )
+    try:
+        return sd.InputStream(
+            samplerate=16000,
+            channels=1,
+            dtype="int16",
+            blocksize=256,
+            latency="low",
+            callback=_audio_callback,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Failed to open microphone stream: {exc}") from exc
 
 
 def _recording_to_wav_file() -> str:
@@ -93,8 +103,7 @@ def _recording_to_wav_file() -> str:
         if not _recorded_chunks:
             return ""
         audio = np.concatenate(_recorded_chunks, axis=0)
-    audio = np.clip(audio, -1.0, 1.0)
-    pcm16 = (audio * 32767.0).astype(np.int16)
+    pcm16 = audio.astype(np.int16)
 
     fd, temp_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
@@ -192,12 +201,12 @@ def speak_text(text: str) -> None:
     print("Speaking...")
     url = (
         f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-        f"?output_format=pcm_16000"
+        f"?output_format=mp3_44100_128"
     )
     headers = {
         "xi-api-key": ELEVENLABS_API_KEY,
         "Content-Type": "application/json",
-        "Accept": "audio/pcm",
+        "Accept": "audio/mpeg",
     }
     payload = {
         "text": text,
@@ -206,28 +215,31 @@ def speak_text(text: str) -> None:
 
     resp = requests.post(url, headers=headers, json=payload, timeout=90)
     resp.raise_for_status()
-
-    pcm = np.frombuffer(resp.content, dtype=np.int16)
-    if pcm.size == 0:
+    if not resp.content:
         return
 
-    audio = pcm.astype(np.float32) / 32768.0
-    sd.play(audio, samplerate=16000)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
+        f.write(resp.content)
+        audio_file = f.name
+
+    if not pygame.mixer.get_init():
+        pygame.mixer.init()
+
+    pygame.mixer.music.load(audio_file)
+    pygame.mixer.music.play()
     _is_speaking = True
     try:
-        while True:
+        while pygame.mixer.music.get_busy():
             if _board is not None and _board.button_pressed():
-                sd.stop()
-                break
-            try:
-                stream = sd.get_stream()
-            except Exception:
-                break
-            if stream is None or not stream.active:
+                pygame.mixer.music.stop()
                 break
             time.sleep(0.05)
     finally:
         _is_speaking = False
+        try:
+            os.remove(audio_file)
+        except Exception:
+            pass
 
 
 def speak(text: str) -> None:
