@@ -11,7 +11,12 @@ import sounddevice as sd
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from display_manager import init_display, show_text
+from display_manager import (
+    animate_speaking,
+    init_display,
+    show_avatar,
+    stop_speaking_animation,
+)
 from whisplay import WhisplayBoard
 
 load_dotenv()
@@ -97,7 +102,7 @@ def _recording_to_wav_file() -> str:
 
 
 def transcribe_audio(file_path: str) -> str:
-    show_text("Transcribing...")
+    show_avatar("thinking", "Transcribing...")
     print("Transcribing...")
     # Local whisper-host exposes POST /recognize and accepts a file path in JSON.
     r = requests.post(
@@ -110,7 +115,7 @@ def transcribe_audio(file_path: str) -> str:
 
 
 def ask_llm(transcript: str) -> str:
-    show_text("Thinking...")
+    show_avatar("thinking", transcript[:80])
     print("Thinking...")
     response = client.chat.completions.create(
         model=MODEL_NAME,
@@ -161,7 +166,7 @@ def record_audio() -> str:
     global _is_recording
     if not mic_enabled:
         return ""
-    show_text("Listening...")
+    show_avatar("listening")
     print("Listening...")
     with _record_lock:
         _recorded_chunks.clear()
@@ -192,23 +197,25 @@ def process_turn() -> None:
 
         transcript = transcribe_audio(audio_file)
         if not transcript:
-            show_text("No speech recognized.")
+            show_avatar("idle", "No speech recognized.")
             print("No speech recognized.")
             return
 
         print(f"You: {transcript}")
         reply = ask_llm(transcript)
         if not reply:
-            show_text("Sandy returned an empty response.")
+            show_avatar("idle", "No response.")
             print("Sandy returned an empty response.")
             return
 
         print(f"Sandy: {reply}")
-        show_text(reply[:120])
+        show_avatar("speaking1", reply[:120])
         mic_enabled = False
         try:
+            animate_speaking(reply[:120])
             speak_text(reply)
         finally:
+            stop_speaking_animation()
             mic_enabled = True
     except Exception as exc:
         print(f"Error: {exc}")
@@ -224,15 +231,16 @@ def on_button_press() -> None:
         conversation_active = not conversation_active
         active = conversation_active
     if active:
-        show_text("Conversation mode ON")
+        show_avatar("idle", "Conversation mode ON")
         print("Conversation mode ON")
     else:
-        show_text("Idle")
+        show_avatar("idle")
         print("Conversation mode OFF")
 
 
 def shutdown(signum=None, frame=None) -> None:
     del signum, frame
+    stop_speaking_animation()
     _stop_event.set()
 
 
@@ -245,7 +253,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    show_text("Sandy Ready")
+    show_avatar("idle", "Sandy Ready")
     print("Sandy v1 ready. Press button to toggle conversation mode.")
 
     try:

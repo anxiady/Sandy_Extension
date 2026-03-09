@@ -1,20 +1,26 @@
+import os
 import queue
 import textwrap
 import threading
+import time
 
 from PIL import Image, ImageDraw, ImageFont
 
 from utils import ImageUtils
 from whisplay import WhisplayBoard
 
+AVATAR_DIR = os.path.join(os.path.dirname(__file__), "ui", "avatar")
+_SUBTITLE_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
 _board = None
 _worker_started = False
-_queue = queue.Queue(maxsize=1)
+_render_queue = queue.Queue(maxsize=1)
 _state_lock = threading.Lock()
-_font = ImageFont.truetype(
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    36,
-)
+_subtitle_font = ImageFont.truetype(_SUBTITLE_FONT_PATH, 18)
+_current_state = "idle"
+_current_subtitle = ""
+_speaking = False
+_speaking_thread = None
 
 
 def init_display(board=None):
@@ -25,41 +31,82 @@ def init_display(board=None):
             board.set_backlight(100)
         _board = board
         if not _worker_started:
-            threading.Thread(target=_display_worker, daemon=True).start()
+            threading.Thread(target=_render_worker, daemon=True).start()
             _worker_started = True
 
 
-def show_text(message):
+def show_avatar(state, subtitle=""):
+    global _current_state, _current_subtitle
     with _state_lock:
         has_board = _board is not None
+        _current_state = state or "idle"
+        _current_subtitle = subtitle or ""
     if not has_board:
         init_display()
-    if message is None:
-        message = ""
-    text = str(message)
+    _enqueue_render((_current_state, _current_subtitle))
+
+
+def animate_speaking(subtitle=""):
+    global _speaking, _speaking_thread
+    with _state_lock:
+        if _speaking:
+            return
+        _speaking = True
+    _speaking_thread = threading.Thread(
+        target=_speaking_loop, args=(subtitle or "",), daemon=True
+    )
+    _speaking_thread.start()
+
+
+def stop_speaking_animation():
+    global _speaking, _speaking_thread
+    with _state_lock:
+        _speaking = False
+        worker = _speaking_thread
+    if worker is not None:
+        worker.join(timeout=0.5)
+    with _state_lock:
+        _speaking_thread = None
+
+
+def _speaking_loop(subtitle):
+    while True:
+        with _state_lock:
+            if not _speaking:
+                break
+        show_avatar("speaking1", subtitle)
+        time.sleep(0.2)
+        with _state_lock:
+            if not _speaking:
+                break
+        show_avatar("speaking2", subtitle)
+        time.sleep(0.2)
+
+
+def _enqueue_render(item):
     try:
-        _queue.put_nowait(text)
+        _render_queue.put_nowait(item)
     except queue.Full:
         try:
-            _queue.get_nowait()
+            _render_queue.get_nowait()
         except queue.Empty:
             pass
         try:
-            _queue.put_nowait(text)
+            _render_queue.put_nowait(item)
         except queue.Full:
             pass
 
 
-def _display_worker():
+def _render_worker():
     while True:
-        message = _queue.get()
+        state, subtitle = _render_queue.get()
         try:
-            _render_text(message)
+            _render_avatar(state, subtitle)
         except Exception as exc:
             print(f"[display] render error: {exc}")
 
 
-def _render_text(message):
+def _render_avatar(state, subtitle):
     with _state_lock:
         board = _board
     if board is None:
@@ -67,37 +114,39 @@ def _render_text(message):
 
     width = board.LCD_WIDTH
     height = board.LCD_HEIGHT
-    image = Image.new("RGB", (width, height), (0, 0, 0))
+    image = _load_avatar_image(state, width, height)
     draw = ImageDraw.Draw(image)
-    wrapped_lines = textwrap.wrap(message, width=10) or [""]
-    visible_lines = wrapped_lines[:4]
-
-    line_spacing = 12
-    line_heights = []
-    max_line_width = 0
-    for line in visible_lines:
-        bbox = draw.textbbox((0, 0), line, font=_font)
-        line_width = bbox[2] - bbox[0]
-        line_height = bbox[3] - bbox[1]
-        max_line_width = max(max_line_width, line_width)
-        line_heights.append(line_height)
-
-    text_block_height = sum(line_heights)
-    if len(line_heights) > 1:
-        text_block_height += line_spacing * (len(line_heights) - 1)
-
-    start_y = max(0, (height - text_block_height) // 2)
-
-    cursor_y = start_y
-    for idx, line in enumerate(visible_lines):
-        bbox = draw.textbbox((0, 0), line, font=_font)
-        line_width = bbox[2] - bbox[0]
-        line_height = bbox[3] - bbox[1]
-        line_x = max(0, (width - line_width) // 2)
-        draw.text((line_x, cursor_y), line, fill=(255, 255, 255), font=_font)
-        cursor_y += line_height
-        if idx < len(visible_lines) - 1:
-            cursor_y += line_spacing
+    _draw_subtitle(draw, width, height, subtitle)
 
     rgb565_data = ImageUtils.image_to_rgb565(image, width, height)
     board.draw_image(0, 0, width, height, rgb565_data)
+
+
+def _load_avatar_image(state, width, height):
+    path = os.path.join(AVATAR_DIR, f"{state}.png")
+    if not os.path.exists(path):
+        path = os.path.join(AVATAR_DIR, "idle.png")
+    image = Image.open(path).convert("RGB")
+    if image.size != (width, height):
+        image = image.resize((width, height), Image.LANCZOS)
+    return image
+
+
+def _draw_subtitle(draw, width, height, subtitle):
+    if not subtitle:
+        return
+    text = str(subtitle).strip()
+    if not text:
+        return
+
+    lines = textwrap.wrap(text, width=28)[:2]
+    footer_top = height - 46
+    draw.rectangle((0, footer_top, width, height), fill=(0, 0, 0))
+
+    y = footer_top + 4
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=_subtitle_font)
+        line_width = bbox[2] - bbox[0]
+        x = max(0, (width - line_width) // 2)
+        draw.text((x, y), line, fill=(255, 255, 255), font=_subtitle_font)
+        y += (bbox[3] - bbox[1]) + 2
