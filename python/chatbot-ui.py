@@ -77,18 +77,23 @@ _resume_reply_text = ""
 _barge_in_started_at = 0.0
 _playback_floor_rms = 0.0
 _playback_floor_peak = 0.0
+_user_voice_rms = 2600.0
+_user_voice_peak = 9000.0
 
 BARGE_IN_PEAK_THRESHOLD = int(os.getenv("BARGE_IN_PEAK_THRESHOLD", "9000"))
 BARGE_IN_RMS_THRESHOLD = int(os.getenv("BARGE_IN_RMS_THRESHOLD", "2200"))
-BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "24"))
+BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "10"))
 BARGE_IN_CALIBRATION_SEC = float(os.getenv("BARGE_IN_CALIBRATION_SEC", "0.8"))
 BARGE_IN_RMS_MULTIPLIER = float(os.getenv("BARGE_IN_RMS_MULTIPLIER", "2.5"))
 BARGE_IN_PEAK_MULTIPLIER = float(os.getenv("BARGE_IN_PEAK_MULTIPLIER", "2.0"))
+USER_RMS_FACTOR = float(os.getenv("USER_RMS_FACTOR", "0.8"))
+USER_PEAK_FACTOR = float(os.getenv("USER_PEAK_FACTOR", "0.75"))
 
 
 def _audio_callback(indata, frames, time_info, status):
     global _barge_in_requested, _barge_in_frames
     global _playback_floor_peak, _playback_floor_rms
+    global _user_voice_peak, _user_voice_rms
     del frames, time_info
     try:
         # Ignore overflow/underflow warnings to keep capture loop stable.
@@ -104,10 +109,14 @@ def _audio_callback(indata, frames, time_info, status):
                 _barge_in_frames = 0
             else:
                 dynamic_peak_threshold = max(
-                    BARGE_IN_PEAK_THRESHOLD, _playback_floor_peak * BARGE_IN_PEAK_MULTIPLIER
+                    BARGE_IN_PEAK_THRESHOLD,
+                    _playback_floor_peak * BARGE_IN_PEAK_MULTIPLIER,
+                    _user_voice_peak * USER_PEAK_FACTOR,
                 )
                 dynamic_rms_threshold = max(
-                    BARGE_IN_RMS_THRESHOLD, _playback_floor_rms * BARGE_IN_RMS_MULTIPLIER
+                    BARGE_IN_RMS_THRESHOLD,
+                    _playback_floor_rms * BARGE_IN_RMS_MULTIPLIER,
+                    _user_voice_rms * USER_RMS_FACTOR,
                 )
                 if peak >= dynamic_peak_threshold and rms >= dynamic_rms_threshold:
                     _barge_in_frames += 1
@@ -151,6 +160,28 @@ def _recording_to_wav_file() -> str:
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(pcm16.tobytes())
     return temp_path
+
+
+def _update_user_voice_profile(chunks):
+    global _user_voice_peak, _user_voice_rms
+    if not chunks:
+        return
+    rms_values = []
+    peak_values = []
+    for chunk in chunks:
+        peak = float(np.max(np.abs(chunk)))
+        if peak < SILENCE_THRESHOLD:
+            continue
+        rms = float(np.sqrt(np.mean(np.square(chunk.astype(np.float32)))))
+        peak_values.append(peak)
+        rms_values.append(rms)
+    if not rms_values:
+        return
+    observed_rms = float(np.percentile(rms_values, 70))
+    observed_peak = float(np.percentile(peak_values, 85))
+    # Smooth update so thresholds adapt to each user but stay stable.
+    _user_voice_rms = (_user_voice_rms * 0.8) + (observed_rms * 0.2)
+    _user_voice_peak = (_user_voice_peak * 0.8) + (observed_peak * 0.2)
 
 
 def transcribe_audio(file_path: str) -> str:
@@ -340,6 +371,8 @@ def record_audio() -> str:
         time.sleep(0.05)
     with _record_lock:
         _is_recording = False
+        captured_chunks = list(_recorded_chunks)
+    _update_user_voice_profile(captured_chunks)
     if not is_conversation_active():
         return ""
     return _recording_to_wav_file()
