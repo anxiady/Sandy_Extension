@@ -74,9 +74,10 @@ whisplay = None
 _is_speaking = False
 _barge_in_requested = False
 _barge_in_frames = 0
+_resume_reply_text = ""
 
-BARGE_IN_THRESHOLD = int(os.getenv("BARGE_IN_THRESHOLD", "1800"))
-BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "4"))
+BARGE_IN_THRESHOLD = int(os.getenv("BARGE_IN_THRESHOLD", "4000"))
+BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "8"))
 
 
 def _audio_callback(indata, frames, time_info, status):
@@ -213,7 +214,7 @@ def needs_clarification(query: str) -> bool:
     return False
 
 
-def speak_text(text: str) -> None:
+def speak_text(text: str) -> bool:
     global _is_speaking, _barge_in_requested, _barge_in_frames
     print("Speaking...")
     url = (
@@ -233,7 +234,7 @@ def speak_text(text: str) -> None:
     resp = requests.post(url, headers=headers, json=payload, timeout=90)
     resp.raise_for_status()
     if not resp.content:
-        return
+        return False
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
         f.write(resp.content)
@@ -245,6 +246,7 @@ def speak_text(text: str) -> None:
     pygame.mixer.music.load(audio_file)
     pygame.mixer.music.play()
     _is_speaking = True
+    interrupted = False
     _barge_in_requested = False
     _barge_in_frames = 0
     try:
@@ -252,10 +254,12 @@ def speak_text(text: str) -> None:
             if whisplay is not None and whisplay.button_pressed():
                 pygame.mixer.music.stop()
                 print("Speech interrupted")
+                interrupted = True
                 break
             if _barge_in_requested:
                 pygame.mixer.music.stop()
                 print("Speech interrupted by voice")
+                interrupted = True
                 break
             time.sleep(0.05)
     finally:
@@ -266,10 +270,11 @@ def speak_text(text: str) -> None:
             os.remove(audio_file)
         except Exception:
             pass
+    return interrupted
 
 
-def speak(text: str) -> None:
-    speak_text(text)
+def speak(text: str) -> bool:
+    return speak_text(text)
 
 
 def is_conversation_active() -> bool:
@@ -315,7 +320,7 @@ def record_audio() -> str:
 
 
 def process_turn() -> None:
-    global mic_enabled
+    global mic_enabled, _resume_reply_text
     if not _busy_lock.acquire(blocking=False):
         return
 
@@ -330,6 +335,18 @@ def process_turn() -> None:
         clean_audio_file(audio_file, clean_audio_path)
         raw_transcript = transcribe_audio(clean_audio_path)
         if not raw_transcript:
+            if _resume_reply_text:
+                show_avatar("speaking1", _resume_reply_text[:120])
+                mic_enabled = False
+                try:
+                    animate_speaking(_resume_reply_text[:120])
+                    interrupted = speak_text(_resume_reply_text)
+                    if not interrupted:
+                        _resume_reply_text = ""
+                finally:
+                    stop_speaking_animation()
+                    mic_enabled = True
+                return
             show_avatar("idle", "No speech recognized.")
             print("No speech recognized.")
             return
@@ -342,12 +359,27 @@ def process_turn() -> None:
         print("Normalized:", normalized_query)
         transcript = normalized_query
 
+        if _resume_reply_text and len(transcript.split()) <= 1:
+            show_avatar("speaking1", _resume_reply_text[:120])
+            mic_enabled = False
+            try:
+                animate_speaking(_resume_reply_text[:120])
+                interrupted = speak_text(_resume_reply_text)
+                if not interrupted:
+                    _resume_reply_text = ""
+            finally:
+                stop_speaking_animation()
+                mic_enabled = True
+            return
+
         if needs_clarification(transcript):
             show_avatar("speaking1", "Do you mean the most recent events?")
             mic_enabled = False
             try:
                 animate_speaking("Do you mean the most recent events?")
-                speak("Do you mean the most recent events?")
+                interrupted = speak("Do you mean the most recent events?")
+                if interrupted and _resume_reply_text:
+                    pass
             finally:
                 stop_speaking_animation()
                 mic_enabled = True
@@ -366,7 +398,11 @@ def process_turn() -> None:
         mic_enabled = False
         try:
             animate_speaking(reply[:120])
-            speak_text(reply)
+            interrupted = speak_text(reply)
+            if interrupted:
+                _resume_reply_text = reply
+            else:
+                _resume_reply_text = ""
         finally:
             stop_speaking_animation()
             mic_enabled = True
