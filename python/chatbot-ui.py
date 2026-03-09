@@ -129,6 +129,40 @@ def ask_llm(transcript: str) -> str:
     return (reply or "").strip()
 
 
+def normalize_query(text: str) -> str:
+    show_avatar("thinking", "Interpreting...")
+    prompt = f"""
+You are a speech interpretation system.
+
+The text below came from speech recognition and may contain mistakes.
+
+Correct transcription errors and produce the most likely user query.
+
+Do not change the meaning.
+
+Examples:
+
+iron war → Iran war
+watch island eat → what time is it
+news about ukraine worn → news about the Ukraine war
+
+Transcript:
+{text}
+
+Corrected query:
+"""
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": "You correct speech recognition mistakes."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0,
+    )
+    corrected = response.choices[0].message.content
+    return (corrected or "").strip()
+
+
 def speak_text(text: str) -> None:
     print("Speaking...")
     url = (
@@ -195,14 +229,20 @@ def process_turn() -> None:
             print("No audio captured.")
             return
 
-        transcript = transcribe_audio(audio_file)
-        if not transcript:
+        raw_transcript = transcribe_audio(audio_file)
+        if not raw_transcript:
             show_avatar("idle", "No speech recognized.")
             print("No speech recognized.")
             return
 
-        print(f"You: {transcript}")
-        reply = ask_llm(transcript)
+        normalized_query = normalize_query(raw_transcript)
+        if not normalized_query:
+            normalized_query = raw_transcript
+
+        print("Raw:", raw_transcript)
+        print("Normalized:", normalized_query)
+
+        reply = ask_llm(normalized_query)
         if not reply:
             show_avatar("idle", "No response.")
             print("Sandy returned an empty response.")
