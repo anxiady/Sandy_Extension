@@ -4,11 +4,12 @@ import tempfile
 from faster_whisper import WhisperModel
 from flask import Flask, jsonify, request
 
-MODEL_NAME = "small"
+MODEL_NAME = "small.en"
 DEVICE = "cpu"
 
 print("[INIT] Loading Faster Whisper model...")
 model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type="int8")
+print("Whisper model loaded and ready")
 
 app = Flask(__name__)
 

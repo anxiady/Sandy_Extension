@@ -7,6 +7,7 @@ flask
 openai
 requests
 sounddevice
+pygame
 python-dotenv
 openai-whisper
 torch

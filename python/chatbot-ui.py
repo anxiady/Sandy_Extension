@@ -37,6 +37,8 @@ ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5").stri
 SAMPLE_RATE = int(os.getenv("MIC_SAMPLE_RATE", "16000"))
 CHANNELS = 1
 TURN_RECORD_SECONDS = float(os.getenv("TURN_RECORD_SECONDS", "4.0"))
+SILENCE_TIMEOUT_SEC = 0.8
+SILENCE_THRESHOLD = 800
 
 if not api_key:
     raise RuntimeError("Missing API key. Set KIMI_API_KEY in .env")
@@ -262,10 +264,26 @@ def record_audio() -> str:
     with _record_lock:
         _recorded_chunks.clear()
         _is_recording = True
-    end_time = time.time() + TURN_RECORD_SECONDS
+    start_time = time.time()
+    end_time = start_time + min(TURN_RECORD_SECONDS, 4.0)
+    silence_started_at = None
     while time.time() < end_time and not _stop_event.is_set():
         if not is_conversation_active():
             break
+        latest_chunk = None
+        with _record_lock:
+            if _recorded_chunks:
+                latest_chunk = _recorded_chunks[-1]
+        if latest_chunk is not None:
+            amplitude = float(np.max(np.abs(latest_chunk)))
+            if amplitude < SILENCE_THRESHOLD:
+                if silence_started_at is None:
+                    silence_started_at = time.time()
+                elif time.time() - silence_started_at >= SILENCE_TIMEOUT_SEC:
+                    # Stop early when sustained silence is detected.
+                    break
+            else:
+                silence_started_at = None
         time.sleep(0.05)
     with _record_lock:
         _is_recording = False
