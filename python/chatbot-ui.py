@@ -68,6 +68,7 @@ _state_lock = threading.Lock()
 _busy_lock = threading.Lock()
 _stop_event = threading.Event()
 _board = None
+whisplay = None
 _is_speaking = False
 
 
@@ -230,8 +231,9 @@ def speak_text(text: str) -> None:
     _is_speaking = True
     try:
         while pygame.mixer.music.get_busy():
-            if _board is not None and _board.button_pressed():
+            if whisplay is not None and whisplay.button_pressed():
                 pygame.mixer.music.stop()
+                print("Speech interrupted")
                 break
             time.sleep(0.05)
     finally:
@@ -361,10 +363,11 @@ def shutdown(signum=None, frame=None) -> None:
 
 
 def main() -> None:
-    global _board
+    global _board, whisplay
     board = WhisplayBoard()
     board.set_backlight(100)
     _board = board
+    whisplay = board
     board.on_button_press(on_button_press)
     init_display(board)
 
