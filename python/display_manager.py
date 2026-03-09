@@ -41,7 +41,10 @@ def show_text(message):
 def _display_worker():
     while True:
         message = _queue.get()
-        _render_text(message)
+        try:
+            _render_text(message)
+        except Exception as exc:
+            print(f"[display] render error: {exc}")
 
 
 def _render_text(message):

@@ -238,6 +238,7 @@ def shutdown(signum=None, frame=None) -> None:
 
 def main() -> None:
     board = WhisplayBoard()
+    board.set_backlight(100)
     board.on_button_press(on_button_press)
     init_display(board)
 
