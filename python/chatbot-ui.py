@@ -82,7 +82,7 @@ _user_voice_peak = 2200.0
 
 BARGE_IN_PEAK_THRESHOLD = int(os.getenv("BARGE_IN_PEAK_THRESHOLD", "1800"))
 BARGE_IN_RMS_THRESHOLD = int(os.getenv("BARGE_IN_RMS_THRESHOLD", "180"))
-BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "4"))
+BARGE_IN_FRAMES_REQUIRED = int(os.getenv("BARGE_IN_FRAMES_REQUIRED", "10"))
 BARGE_IN_CALIBRATION_SEC = float(os.getenv("BARGE_IN_CALIBRATION_SEC", "0.35"))
 BARGE_IN_RMS_MULTIPLIER = float(os.getenv("BARGE_IN_RMS_MULTIPLIER", "1.3"))
 BARGE_IN_PEAK_MULTIPLIER = float(os.getenv("BARGE_IN_PEAK_MULTIPLIER", "1.45"))
@@ -90,6 +90,9 @@ USER_RMS_FACTOR = float(os.getenv("USER_RMS_FACTOR", "0.5"))
 USER_PEAK_FACTOR = float(os.getenv("USER_PEAK_FACTOR", "0.5"))
 BARGE_IN_MAX_PEAK_THRESHOLD = int(os.getenv("BARGE_IN_MAX_PEAK_THRESHOLD", "11000"))
 BARGE_IN_MAX_RMS_THRESHOLD = int(os.getenv("BARGE_IN_MAX_RMS_THRESHOLD", "2400"))
+VOICE_MIN_RMS = int(os.getenv("VOICE_MIN_RMS", "350"))
+VOICE_ZCR_MIN = float(os.getenv("VOICE_ZCR_MIN", "0.02"))
+VOICE_ZCR_MAX = float(os.getenv("VOICE_ZCR_MAX", "0.22"))
 
 
 def _audio_callback(indata, frames, time_info, status):
@@ -104,6 +107,9 @@ def _audio_callback(indata, frames, time_info, status):
         if _is_speaking:
             peak = float(np.max(np.abs(indata)))
             rms = float(np.sqrt(np.mean(np.square(indata.astype(np.float32)))))
+            centered = indata[:, 0].astype(np.float32)
+            zc = np.where(np.diff(np.signbit(centered)))[0]
+            zcr = float(len(zc)) / max(1, len(centered))
             speaking_elapsed = time.time() - _barge_in_started_at
             if speaking_elapsed < BARGE_IN_CALIBRATION_SEC:
                 _playback_floor_peak = max(_playback_floor_peak, peak)
@@ -123,11 +129,12 @@ def _audio_callback(indata, frames, time_info, status):
                 )
                 dynamic_peak_threshold = min(dynamic_peak_threshold, BARGE_IN_MAX_PEAK_THRESHOLD)
                 dynamic_rms_threshold = min(dynamic_rms_threshold, BARGE_IN_MAX_RMS_THRESHOLD)
-                meets_normal_gate = peak >= dynamic_peak_threshold and rms >= dynamic_rms_threshold
-                meets_strong_burst = (
-                    peak >= dynamic_peak_threshold * 1.2 and rms >= dynamic_rms_threshold * 0.7
+                # Require sustained speech-like signal, not just spikes/noise.
+                speech_like = (
+                    rms >= VOICE_MIN_RMS and VOICE_ZCR_MIN <= zcr <= VOICE_ZCR_MAX
                 )
-                if meets_normal_gate or meets_strong_burst:
+                meets_gate = peak >= dynamic_peak_threshold and rms >= dynamic_rms_threshold
+                if meets_gate and speech_like:
                     _barge_in_frames += 1
                     if _barge_in_frames >= BARGE_IN_FRAMES_REQUIRED:
                         _barge_in_requested = True
